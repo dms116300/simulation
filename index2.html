@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>단일슬릿 회절 시뮬레이션 (3D)</title>
+<style>
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 20px;
+  background: #101827;
+  color: white;
+  font-family: Arial, sans-serif;
+}
+
+.container { max-width: 1100px; margin: auto; }
+
+h1 { text-align: center; color: #6cff8c; }
+
+.controls {
+  background: #1e293b;
+  padding: 20px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+button {
+  padding: 12px 20px;
+  margin: 5px;
+  border: none;
+  border-radius: 8px;
+  background: #334155;
+  color: white;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+button:hover { background: #475569; }
+button.active,
+button.active:hover { background: #16a34a; }
+
+input[type=range] { width: 300px; vertical-align: middle; }
+
+label.check { font-size: 16px; cursor: pointer; margin-left: 5px; }
+label.check input { transform: scale(1.3); margin-right: 8px; vertical-align: middle; }
+
+/* 3D 장면 */
+#scene3d {
+  position: relative;
+  width: 100%;
+  min-height: 360px;
+  background: #020617;
+  border-radius: 12px;
+  overflow: hidden;
+}
+#scene3d canvas { display: block; }
+
+#loading3d {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  text-align: center;
+  color: #94a3b8;
+  min-height: 360px;
+}
+
+.hint {
+  color: #94a3b8;
+  font-size: 14px;
+  margin: 8px 0 20px;
+  line-height: 1.7;
+}
+
+/* 2D 회절무늬 */
+#pattern {
+  width: 100%;
+  height: auto;
+  display: block;
+  background: #020617;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+.info {
+  background: #1e293b;
+  padding: 20px;
+  border-radius: 12px;
+  line-height: 1.9;
+}
+
+.value { color: #6cff8c; font-weight: bold; }
+
+table { border-collapse: collapse; margin: 10px 0 14px; }
+th, td { border: 1px solid #334155; padding: 6px 16px; text-align: center; }
+th { background: #0f172a; color: #cbd5e1; font-weight: normal; }
+tr.current td { color: #6cff8c; font-weight: bold; background: #0f2a1d; }
+</style>
+
+<!-- Three.js (인터넷 연결 필요) -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+
+<body>
+<div class="container">
+
+<h1>단일슬릿 회절 시뮬레이션 (3D)</h1>
+
+<div class="controls">
+  <h3>슬릿 폭 선택</h3>
+  <button class="width-btn" data-a="0.05">0.05 mm</button>
+  <button class="width-btn active" data-a="0.10">0.10 mm</button>
+  <button class="width-btn" data-a="0.20">0.20 mm</button>
+
+  <h3>스크린 거리</h3>
+  <input type="range" id="distance" min="0.5" max="2" step="0.1" value="1">
+  <span id="distanceValue">1.0 m</span>
+
+  <h3>시점</h3>
+  <button class="view-btn active" data-view="3d">비스듬히 (3D)</button>
+  <button class="view-btn" data-view="top">위에서</button>
+  <button class="view-btn" data-view="side">옆에서</button>
+  <button class="view-btn" data-view="screen">스크린 정면</button>
+
+  <h3>표시</h3>
+  <label class="check">
+    <input type="checkbox" id="boost" checked>
+    주변 무늬 밝기 강조 (눈으로 보는 밝기에 가깝게 · 그래프는 항상 실제 세기)
+  </label>
+
+  <br><br>
+
+  <button id="animBtn">⏸ 애니메이션 정지</button>
+  <button id="resetBtn">초기화</button>
+</div>
+
+<h3>① 단일슬릿 실험 구조 (3D)</h3>
+<div id="scene3d">
+  <div id="loading3d">3D 장면을 불러오는 중…</div>
+</div>
+<p class="hint">
+  🖱 드래그: 회전 · 휠: 확대/축소 · 오른쪽 드래그: 이동<br>
+  슬릿을 지난 초록 물결이 퍼져 나가면서, 특정 방향(빨간 점선)에서는 슬릿 안 각 부분에서 온 빛이 서로 상쇄되어 어두운 줄이 생깁니다.<br>
+  스크린에는 레이저 빔 높이의 가는 가로 띠 안에 <b>넓고 밝은 중앙 무늬</b>와, 그 절반 폭의 <b>점점 어두워지는 주변 무늬</b>가 나타납니다. ‘스크린 정면’ 시점으로 보면 잘 보입니다.
+</p>
+
+<h3>② 스크린에 나타나는 회절무늬와 세기 분포 (±25 mm 범위)</h3>
+<canvas id="pattern" width="1100" height="320"></canvas>
+
+<div class="info">
+  <h3>실험 결과</h3>
+  빛의 파장: <span class="value">532 nm (초록색)</span><br>
+  슬릿 폭: <span class="value" id="widthResult">0.10 mm</span><br>
+  스크린 거리: <span class="value" id="lengthResult">1.0 m</span><br>
+  첫 번째 어두운 무늬 위치: <span class="value" id="firstMinResult">5.32 mm</span> (y₁ = λL / a)<br>
+  중앙 밝은 무늬 폭: <span class="value" id="centralResult">10.64 mm</span> (2λL / a)<br>
+  주변 밝은 무늬 폭: <span class="value" id="sideResult">5.32 mm</span> (λL / a)<br>
+  어두운 무늬 조건: <span class="value">a sinθ = mλ</span> (m = ±1, ±2, …)<br>
+  스크린 세기 분포: <span class="value">I(y) = I₀ [sin β / β]²,  β = π a y / (λL)</span>
+
+  <table>
+    <thead>
+      <tr><th>슬릿 폭 a</th><th>첫 어두운 무늬 y₁</th><th>중앙 밝은 무늬 폭</th></tr>
+    </thead>
+    <tbody id="compareBody"></tbody>
+  </table>
+
+  <p id="explanation"></p>
+  <p style="color:#94a3b8;font-size:14px;margin:0">
+    ※ 3D 장면은 잘 보이도록 슬릿 폭을 확대하고 파면 간격(파장)을 크게 그렸습니다.
+    대신 어두운 줄의 방향과 스크린 무늬 위치는 실제 계산값(y = mλL/a)과 같은 비율이며,
+    원거리(프라운호퍼)·근축 근사로 계산했습니다.
+  </p>
+</div>
+
+</div>
+
+<!-- ===== 공통 상태 · 2D 그림 · 결과 표시 (일반 스크립트) ===== -->
+<script>
+const lambda = 532e-9;          // 파장 (m)
+const DEFAULT_A = 0.10;         // 슬릿 폭 (mm)
+const DEFAULT_L = 1.0;          // 스크린 거리 (m)
+const WIDTHS = [0.05, 0.10, 0.20];
+window.VIEW_HALF_MM = 25;       // ±25 mm 표시
+
+window.simState = { a: DEFAULT_A, L: DEFAULT_L, running: true, boost: true };
+
+// 첫 번째 어두운 무늬 위치 y₁ = λL/a (mm)
+window.getMinMM = (a = simState.a, L = simState.L) => lambda * L / (a * 1e-3) * 1000;
+
+// 스크린 위치 y(mm)의 상대 세기: I = [sin β / β]², β = π y / y₁
+window.intensityAt = (yMM, y1) => {
+  const b = Math.PI * yMM / y1;
+  if (Math.abs(b) < 1e-6) return 1;
+  const s = Math.sin(b) / b;
+  return s * s;
+};
+
+// 주변 무늬는 중앙의 4.7%, 1.6% … 로 매우 어두우므로, 눈으로 보는 밝기처럼 강조(감마) 표시
+window.BOOST_GAMMA = 0.35;
+window.displayLevel = I => simState.boost ? Math.pow(I, BOOST_GAMMA) : I;
+
+// 레이저 빔 세로 단면(가우시안) 표준편차 (mm) — 무늬가 가는 가로 띠로 보이게 함
+window.BEAM_SIGMA_MM = 0.6;
+
+// 흰 종이 스크린 위 초록 빛의 색 (a: 0~1 밝기)
+const SCREEN_PAPER = [176, 182, 190];
+const SCREEN_GREEN = [40, 235, 90];
+const SCREEN_HOT   = [225, 255, 225];
+window.screenColor = a => {
+  a = Math.min(1, Math.max(0, a));
+  const hot = Math.max(0, (a - 0.7) / 0.3) * 0.7;   // 가장 밝은 중심부는 하얗게 빛남
+  return SCREEN_PAPER.map((p, k) => {
+    const c = p + (SCREEN_GREEN[k] - p) * a;
+    return Math.round(c + (SCREEN_HOT[k] - c) * hot);
+  });
+};
+
+// 빔 단면 세로 분포 (t = 세로 위치 / σ): 중심부 + 약한 산란광
+window.beamProfile = t => Math.exp(-t * t) + 0.18 * Math.exp(-t * t / 9);
+
+const pattern = document.getElementById("pattern");
+const pctx = pattern.getContext("2d");
+const distanceInput = document.getElementById("distance");
+const distanceValue = document.getElementById("distanceValue");
+const boostInput = document.getElementById("boost");
+const animBtn = document.getElementById("animBtn");
+const resetBtn = document.getElementById("resetBtn");
+
+function emit(name, detail) {
+  document.dispatchEvent(new CustomEvent(name, { detail }));
+}
+
+function setActive(selector, btn) {
+  document.querySelectorAll(selector).forEach(b => b.classList.toggle("active", b === btn));
+}
+
+// ===== 이벤트 =====
+document.querySelectorAll(".width-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    simState.a = Number(btn.dataset.a);
+    setActive(".width-btn", btn);
+    update();
+  });
+});
+
+distanceInput.addEventListener("input", () => {
+  simState.L = Number(distanceInput.value);
+  distanceValue.textContent = simState.L.toFixed(1) + " m";
+  update();
+});
+
+boostInput.addEventListener("change", () => {
+  simState.boost = boostInput.checked;
+  update();
+});
+
+document.querySelectorAll(".view-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    setActive(".view-btn", btn);
+    emit("sim:view", btn.dataset.view);
+  });
+});
+
+animBtn.addEventListener("click", () => {
+  simState.running = !simState.running;
+  animBtn.textContent = simState.running ? "⏸ 애니메이션 정지" : "▶ 애니메이션 시작";
+});
+
+resetBtn.addEventListener("click", () => {
+  simState.a = DEFAULT_A;
+  simState.L = DEFAULT_L;
+  simState.running = true;
+  simState.boost = true;
+  boostInput.checked = true;
+  distanceInput.value = DEFAULT_L;
+  distanceValue.textContent = DEFAULT_L.toFixed(1) + " m";
+  animBtn.textContent = "⏸ 애니메이션 정지";
+  setActive(".width-btn", document.querySelector(`.width-btn[data-a="${DEFAULT_A.toFixed(2)}"]`));
+  setActive(".view-btn", document.querySelector(".view-btn"));
+  update();
+  emit("sim:reset");
+});
+
+function update() {
+  updateInfo();
+  drawPattern();
+  emit("sim:change");
+}
+
+// ===== 스크린 회절무늬 + 세기 그래프 (2D) =====
+function drawPattern() {
+  const W = pattern.width;
+  const H = pattern.height;
+  const barH = 100;                       // 무늬 띠
+  const brY = 145;                        // 중앙 무늬 폭 표시 줄
+  const gTop = 175, gBot = 305, gH = gBot - gTop;   // 세기 그래프
+  const half = VIEW_HALF_MM;
+  const scale = W / (2 * half);           // px per mm
+  const y1 = getMinMM();
+  const xOf = mm => W / 2 + mm * scale;
+
+  pctx.fillStyle = "#020617";
+  pctx.fillRect(0, 0, W, H);
+
+  // --- 무늬 띠: 가로 sinc² × 세로 레이저 빔 단면 ---
+  const img = pctx.createImageData(W, barH);
+  const sigPx = BEAM_SIGMA_MM * scale;
+  const colI = new Float32Array(W);
+  for (let x = 0; x < W; x++) colI[x] = displayLevel(intensityAt((x + 0.5 - W / 2) / scale, y1));
+  for (let y = 0; y < barH; y++) {
+    const prof = beamProfile((y + 0.5 - barH / 2) / sigPx);
+    for (let x = 0; x < W; x++) {
+      const [r, g, b] = screenColor(colI[x] * prof);
+      const i = (y * W + x) * 4;
+      img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = 255;
+    }
+  }
+  pctx.putImageData(img, 0, 0);
+
+  // --- mm 눈금 ---
+  pctx.fillStyle = "#cbd5e1";
+  pctx.strokeStyle = "#cbd5e1";
+  pctx.lineWidth = 1;
+  pctx.font = "12px Arial";
+  pctx.textAlign = "center";
+  for (let mm = -half; mm <= half; mm += 5) {
+    const x = xOf(mm);
+    pctx.beginPath();
+    pctx.moveTo(x, barH);
+    pctx.lineTo(x, barH + 6);
+    pctx.stroke();
+    const xl = Math.min(Math.max(x, 14), W - 14);
+    pctx.fillText(`${mm}`, xl, barH + 20);
+  }
+  pctx.textAlign = "right";
+  pctx.fillText("(mm)", W - 4, barH + 34);
+
+  // --- 중앙 밝은 무늬 폭 표시 ---
+  const xa = xOf(-y1), xb = xOf(y1);
+  pctx.strokeStyle = "#fde68a";
+  pctx.lineWidth = 1.5;
+  pctx.beginPath();
+  pctx.moveTo(xa, brY); pctx.lineTo(xb, brY);
+  pctx.moveTo(xa, brY - 7); pctx.lineTo(xa, brY + 7);
+  pctx.moveTo(xb, brY - 7); pctx.lineTo(xb, brY + 7);
+  pctx.stroke();
+  const label = `중앙 밝은 무늬 폭 2λL/a = ${(2 * y1).toFixed(2)} mm`;
+  pctx.font = "bold 13px Arial";
+  pctx.textAlign = "center";
+  const tw = pctx.measureText(label).width + 12;
+  pctx.fillStyle = "#020617";
+  pctx.fillRect(W / 2 - tw / 2, brY - 10, tw, 20);
+  pctx.fillStyle = "#fde68a";
+  pctx.fillText(label, W / 2, brY + 5);
+
+  // --- 어두운 무늬 위치 (m = ±1, ±2, …) ---
+  pctx.strokeStyle = "rgba(248,113,113,0.6)";
+  pctx.lineWidth = 1;
+  pctx.setLineDash([3, 4]);
+  for (let m = 1; m * y1 <= half; m++) {
+    for (const s of [-1, 1]) {
+      const x = xOf(s * m * y1);
+      pctx.beginPath();
+      pctx.moveTo(x, gTop - 4);
+      pctx.lineTo(x, gBot);
+      pctx.stroke();
+    }
+  }
+  pctx.setLineDash([]);
+
+  // --- 세기 그래프 ---
+  pctx.strokeStyle = "#475569";
+  pctx.beginPath();
+  pctx.moveTo(0, gBot + 0.5); pctx.lineTo(W, gBot + 0.5);
+  pctx.stroke();
+
+  // ×10 확대 곡선 (주변 무늬 보기)
+  pctx.strokeStyle = "rgba(148,163,184,0.9)";
+  pctx.setLineDash([5, 4]);
+  pctx.beginPath();
+  for (let x = 0; x <= W; x++) {
+    const I = intensityAt((x - W / 2) / scale, y1);
+    const y = gBot - gH * Math.min(1, 10 * I);
+    x === 0 ? pctx.moveTo(x, y) : pctx.lineTo(x, y);
+  }
+  pctx.stroke();
+  pctx.setLineDash([]);
+
+  // 실제 세기
+  pctx.beginPath();
+  pctx.moveTo(0, gBot);
+  for (let x = 0; x <= W; x++) {
+    const I = intensityAt((x - W / 2) / scale, y1);
+    pctx.lineTo(x, gBot - gH * I);
+  }
+  pctx.lineTo(W, gBot);
+  pctx.closePath();
+  pctx.fillStyle = "rgba(74,222,128,0.25)";
+  pctx.fill();
+  pctx.strokeStyle = "#6cff8c";
+  pctx.lineWidth = 2;
+  pctx.beginPath();
+  for (let x = 0; x <= W; x++) {
+    const I = intensityAt((x - W / 2) / scale, y1);
+    const y = gBot - gH * I;
+    x === 0 ? pctx.moveTo(x, y) : pctx.lineTo(x, y);
+  }
+  pctx.stroke();
+  pctx.lineWidth = 1;
+
+  // 범례
+  pctx.font = "12px Arial";
+  pctx.textAlign = "left";
+  const lx = 12, ly = gTop + 6;
+  pctx.strokeStyle = "#6cff8c"; pctx.lineWidth = 2;
+  pctx.beginPath(); pctx.moveTo(lx, ly); pctx.lineTo(lx + 24, ly); pctx.stroke();
+  pctx.fillStyle = "#cbd5e1"; pctx.fillText("실제 세기 I/I₀", lx + 30, ly + 4);
+  pctx.strokeStyle = "rgba(148,163,184,0.9)"; pctx.lineWidth = 1; pctx.setLineDash([5, 4]);
+  pctx.beginPath(); pctx.moveTo(lx, ly + 18); pctx.lineTo(lx + 24, ly + 18); pctx.stroke();
+  pctx.fillText("×10 확대", lx + 30, ly + 22);
+  pctx.strokeStyle = "rgba(248,113,113,0.8)"; pctx.setLineDash([3, 4]);
+  pctx.beginPath(); pctx.moveTo(lx, ly + 36); pctx.lineTo(lx + 24, ly + 36); pctx.stroke();
+  pctx.setLineDash([]);
+  pctx.fillText("어두운 무늬 (y = mλL/a)", lx + 30, ly + 40);
+}
+
+// ===== 결과 표시 =====
+function updateInfo() {
+  const { a, L } = simState;
+  const y1 = getMinMM();
+
+  document.getElementById("widthResult").textContent = a.toFixed(2) + " mm";
+  document.getElementById("lengthResult").textContent = L.toFixed(1) + " m";
+  document.getElementById("firstMinResult").textContent = y1.toFixed(2) + " mm";
+  document.getElementById("centralResult").textContent = (2 * y1).toFixed(2) + " mm";
+  document.getElementById("sideResult").textContent = y1.toFixed(2) + " mm";
+
+  document.getElementById("compareBody").innerHTML = WIDTHS.map(w => {
+    const m = getMinMM(w, L);
+    const cls = Math.abs(w - a) < 1e-9 ? ' class="current"' : "";
+    return `<tr${cls}><td>${w.toFixed(2)} mm</td><td>${m.toFixed(2)} mm</td><td>${(2 * m).toFixed(2)} mm</td></tr>`;
+  }).join("");
+
+  document.getElementById("explanation").textContent =
+    `슬릿 폭이 ${a.toFixed(2)}mm, 스크린 거리가 ${L.toFixed(1)}m일 때 첫 번째 어두운 무늬는 중앙에서 ` +
+    `${y1.toFixed(2)}mm 떨어진 곳에 생기고, 중앙 밝은 무늬의 폭은 ${(2 * y1).toFixed(2)}mm입니다. ` +
+    `슬릿 폭이 좁을수록 빛이 더 넓게 퍼집니다(무늬 폭 ∝ 1/a). ` +
+    `중앙 밝은 무늬는 주변 밝은 무늬보다 2배 넓고, 주변 밝은 무늬는 바깥으로 갈수록 급격히 어두워집니다` +
+    `(첫 번째 약 4.7%, 두 번째 약 1.6%). 밝기 진폭이 일정한 이중슬릿 무늬와 가장 크게 다른 점입니다.`;
+}
+
+update();
+</script>
+
+<!-- ===== 3D 장면 (Three.js 모듈) ===== -->
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const wrap = document.getElementById("scene3d");
+const loading = document.getElementById("loading3d");
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+wrap.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x020617);
+
+const camera = new THREE.PerspectiveCamera(45, 2, 0.05, 200);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 1.5;
+controls.maxDistance = 45;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+sun.position.set(-6, 12, 8);
+scene.add(sun);
+
+// ----- 크기 상수 (장면 단위) -----
+const SCREEN_W = 12;                              // 스크린 가로 = ±25 mm
+const SCREEN_H = 3;
+const SCREEN_CY = 0.2;                            // 스크린 중심 높이 (빔은 y = 0)
+const S = SCREEN_W / (2 * window.VIEW_HALF_MM);   // 스크린 위 1 mm 의 장면 길이
+const CL = 6;                                     // 스크린 거리 1 m 의 장면 길이
+const CA = 1.6;                                   // 슬릿 폭 1 mm 의 장면 길이
+const LASER_X = -4;
+const X_MAX = CL * 2;
+const FLOOR_Y = -1.6;
+const BAR_TOP = 1.1;
+const SLIT_H = 1.0;
+const BAR_HALF = 3.2;
+const BAR_T = 0.08;
+const WAVE_LEN_VIS = 0.32;                        // 화면상 파면 간격
+const WAVE_SPEED = 1.0;
+const GRAPH_Y0 = SCREEN_CY + SCREEN_H / 2 + 0.25;
+const GRAPH_H = 1.3;
+
+const metal = c => new THREE.MeshStandardMaterial({ color: c, metalness: 0.35, roughness: 0.55 });
+
+// ----- 바닥 -----
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(40, 40),
+  new THREE.MeshStandardMaterial({ color: 0x0b1220, roughness: 1 })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.position.set(4, FLOOR_Y - 0.01, 0);
+scene.add(floor);
+const grid = new THREE.GridHelper(40, 40, 0x1e3a5f, 0x14223a);
+grid.position.set(4, FLOOR_Y, 0);
+scene.add(grid);
+
+// ----- 레이저 -----
+const body = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.5, 0.5), metal(0x1f2937));
+body.position.set(LASER_X - 0.8, 0, 0);
+const nose = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.2, 24), metal(0x475569));
+nose.rotation.z = Math.PI / 2;
+nose.position.set(LASER_X + 0.1, 0, 0);
+const standH = -0.25 - FLOOR_Y;
+const stand = new THREE.Mesh(new THREE.BoxGeometry(0.2, standH, 0.3), metal(0x334155));
+stand.position.set(LASER_X - 0.8, FLOOR_Y + standH / 2, 0);
+scene.add(body, nose, stand);
+
+// 슬릿 앞까지 오는 빔
+const beamLen = -LASER_X - 0.2;
+const beam = new THREE.Mesh(
+  new THREE.BoxGeometry(beamLen, 0.06, 1),
+  new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false })
+);
+beam.position.set(LASER_X + 0.2 + beamLen / 2, 0, 0);
+scene.add(beam);
+
+// ----- 단일슬릿 장벽 -----
+const barrier = new THREE.Group();
+scene.add(barrier);
+const barMat = metal(0x64748b);
+const slitGlowMat = new THREE.MeshBasicMaterial({
+  color: 0x86efac, transparent: true, opacity: 0.7,
+  blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+});
+
+function addBox(w, h, d, x, y, z, mat) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set(x, y, z);
+  barrier.add(m);
+}
+
+function buildBarrier(half) {
+  for (const c of [...barrier.children]) { c.geometry.dispose(); barrier.remove(c); }
+  const fullH = BAR_TOP - FLOOR_Y, cy = (BAR_TOP + FLOOR_Y) / 2;
+  const side = BAR_HALF - half;
+  addBox(BAR_T, fullH, side, 0, cy, -(BAR_HALF + half) / 2, barMat);                       // 왼쪽
+  addBox(BAR_T, fullH, side, 0, cy,  (BAR_HALF + half) / 2, barMat);                       // 오른쪽
+  addBox(BAR_T, BAR_TOP - SLIT_H / 2, 2 * half, 0, (BAR_TOP + SLIT_H / 2) / 2, 0, barMat); // 위
+  addBox(BAR_T, -SLIT_H / 2 - FLOOR_Y, 2 * half, 0, (FLOOR_Y - SLIT_H / 2) / 2, 0, barMat); // 아래
+  // 빛이 지나가는 슬릿 부분
+  const g = new THREE.Mesh(new THREE.PlaneGeometry(2 * half, 0.22), slitGlowMat);
+  g.rotation.y = Math.PI / 2;
+  barrier.add(g);
+}
+
+// ----- 파동장 (빔 높이의 수평면) -----
+const U = {
+  uTime:     { value: 0 },
+  uK:        { value: 2 * Math.PI / WAVE_LEN_VIS },
+  uOmega:    { value: 2 * Math.PI / WAVE_LEN_VIS * WAVE_SPEED },
+  uTanMin:   { value: 0.2 },
+  uMaxX:     { value: 6 },
+  uBeamHalf: { value: 0.4 },
+  uHalfA:    { value: 0.08 },
+  uLaserX:   { value: LASER_X + 0.2 },
+  uGamma:    { value: window.BOOST_GAMMA }
+};
+
+const fieldGLSL = `
+uniform float uTime;
+uniform float uK;
+uniform float uOmega;
+uniform float uTanMin;
+uniform float uMaxX;
+uniform float uBeamHalf;
+uniform float uHalfA;
+uniform float uLaserX;
+uniform float uGamma;
+const float PI = 3.14159265;
+
+// 반환값: (진폭 포락선(부호 포함), 위상)
+vec2 field(vec2 p) {
+  float x = p.x;
+  float z = p.y;
+  if (x < uLaserX || x > uMaxX) return vec2(0.0);
+  if (x < 0.0) {
+    // 슬릿으로 들어오는 평면파
+    float e = 1.0 - smoothstep(uBeamHalf * 0.75, uBeamHalf, abs(z));
+    return vec2(e, uK * x);
+  }
+  float r = length(p);
+  // 원거리(프라운호퍼)·근축: 진폭 = sin(beta)/beta, beta = pi * (z/x) / tan(theta1)
+  float b = PI * z / (max(x, 1e-4) * uTanMin);
+  float s = abs(b) < 1e-4 ? 1.0 : sin(b) / b;
+  // 슬릿 바로 뒤에서는 슬릿 폭만큼의 빔으로 자연스럽게 이어지게
+  float nearE = 1.0 - smoothstep(uHalfA * 0.8, uHalfA * 1.3, abs(z));
+  float w = smoothstep(0.0, 1.2, x);
+  float env = mix(nearE, s, w) / sqrt(1.0 + 0.3 * r);
+  return vec2(env, uK * r);
+}
+`;
+
+const fieldMat = new THREE.ShaderMaterial({
+  uniforms: U,
+  vertexShader: fieldGLSL + `
+    varying vec2 vP;
+    void main() {
+      vec3 p = position;
+      vP = p.xz;
+      vec2 f = field(p.xz);
+      p.y += 0.1 * f.x * cos(f.y - uOmega * uTime);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+    }
+  `,
+  fragmentShader: fieldGLSL + `
+    varying vec2 vP;
+    void main() {
+      vec2 f = field(vP);
+      float env = f.x;
+      float I = pow(env * env + 1e-8, uGamma);
+      if (I < 0.004) discard;
+      float c = cos(f.y - uOmega * uTime);
+      float w = 0.5 + 0.5 * (env >= 0.0 ? c : -c);   // 마루 = 1, 골 = 0
+      float b = I * (0.2 + 0.8 * w);
+      vec3 col = mix(vec3(0.06, 0.5, 0.18), vec3(0.8, 1.0, 0.85), w * w * I);
+      gl_FragColor = vec4(col * b * 1.3, 1.0);
+    }
+  `,
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  side: THREE.DoubleSide
+});
+
+const fieldGeo = new THREE.PlaneGeometry(X_MAX - LASER_X, SCREEN_W, 700, 280);
+fieldGeo.rotateX(-Math.PI / 2);
+fieldGeo.translate((X_MAX + LASER_X) / 2, 0, 0);
+const fieldMesh = new THREE.Mesh(fieldGeo, fieldMat);
+fieldMesh.frustumCulled = false;
+scene.add(fieldMesh);
+
+// ----- 스크린 -----
+const screenGroup = new THREE.Group();
+scene.add(screenGroup);
+
+const fringeCanvas = document.createElement("canvas");
+fringeCanvas.width = 1024;
+fringeCanvas.height = 256;
+const fringeTex = new THREE.CanvasTexture(fringeCanvas);
+fringeTex.colorSpace = THREE.SRGBColorSpace;
+fringeTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+const screenGeo = new THREE.PlaneGeometry(SCREEN_W, SCREEN_H);
+screenGeo.rotateY(-Math.PI / 2);                  // 레이저 쪽(-x)을 바라봄
+const screenPlane = new THREE.Mesh(screenGeo, new THREE.MeshBasicMaterial({ map: fringeTex, side: THREE.DoubleSide }));
+screenPlane.position.y = SCREEN_CY;
+screenGroup.add(screenPlane);
+
+const frame = new THREE.Mesh(new THREE.BoxGeometry(0.06, SCREEN_H + 0.12, SCREEN_W + 0.12), metal(0x1e293b));
+frame.position.set(0.05, SCREEN_CY, 0);
+screenGroup.add(frame);
+
+const postH = (SCREEN_CY - SCREEN_H / 2) - FLOOR_Y;
+const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, postH, 1.0), metal(0x334155));
+post.position.set(0.1, FLOOR_Y + postH / 2, 0);
+const foot = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.08, 2.4), metal(0x334155));
+foot.position.set(0.1, FLOOR_Y + 0.04, 0);
+screenGroup.add(post, foot);
+
+// 스크린 위 세기 분포 그래프 (실선: 실제, 점선: ×10)
+const N = 600;
+const curvePos = new Float32Array(N * 3);
+const curveGeo = new THREE.BufferGeometry();
+curveGeo.setAttribute("position", new THREE.BufferAttribute(curvePos, 3));
+const curve = new THREE.Line(curveGeo, new THREE.LineBasicMaterial({ color: 0xbbf7d0 }));
+curve.frustumCulled = false;
+screenGroup.add(curve);
+
+const boostPos = new Float32Array(N * 3);
+const boostGeo = new THREE.BufferGeometry();
+boostGeo.setAttribute("position", new THREE.BufferAttribute(boostPos, 3));
+const boostCurve = new THREE.Line(boostGeo, new THREE.LineDashedMaterial({
+  color: 0x94a3b8, dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.85
+}));
+boostCurve.frustumCulled = false;
+screenGroup.add(boostCurve);
+
+const areaPos = new Float32Array(N * 2 * 3);
+const areaIdx = [];
+for (let i = 0; i < N - 1; i++) {
+  const a = 2 * i, b = a + 1, c = a + 2, d = a + 3;
+  areaIdx.push(a, b, c, b, d, c);
+}
+const areaGeo = new THREE.BufferGeometry();
+areaGeo.setAttribute("position", new THREE.BufferAttribute(areaPos, 3));
+areaGeo.setIndex(areaIdx);
+const area = new THREE.Mesh(areaGeo, new THREE.MeshBasicMaterial({
+  color: 0x4ade80, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false
+}));
+area.frustumCulled = false;
+screenGroup.add(area);
+
+const baseGeo = new THREE.BufferGeometry().setFromPoints([
+  new THREE.Vector3(-0.05, GRAPH_Y0, -SCREEN_W / 2),
+  new THREE.Vector3(-0.05, GRAPH_Y0, SCREEN_W / 2)
+]);
+screenGroup.add(new THREE.Line(baseGeo, new THREE.LineBasicMaterial({ color: 0x64748b })));
+
+// 중앙 밝은 무늬 폭 표시
+const BR_Y = -0.6;
+const bracketGeo = new THREE.BufferGeometry();
+bracketGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(18), 3));
+const bracket = new THREE.LineSegments(bracketGeo, new THREE.LineBasicMaterial({ color: 0xfde68a }));
+bracket.frustumCulled = false;
+screenGroup.add(bracket);
+
+// ----- 중앙 밝은 방향(m = 0)과 어두운 무늬 방향(m = ±1, ±2) -----
+const rays = [-2, -1, 0, 1, 2].map(m => {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6), 3));
+  const mat = m === 0
+    ? new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, depthTest: false })
+    : new THREE.LineDashedMaterial({ color: 0xf87171, transparent: true, opacity: 0.75, dashSize: 0.2, gapSize: 0.15, depthTest: false });
+  const line = new THREE.Line(geo, mat);
+  line.renderOrder = 5;
+  line.frustumCulled = false;
+  line.userData.m = m;
+  scene.add(line);
+  return line;
+});
+
+// ----- 거리 L 표시선 -----
+const DIM_Z = SCREEN_W / 2 + 0.9;
+const dimGeo = new THREE.BufferGeometry();
+dimGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(18), 3));
+const dimLine = new THREE.LineSegments(dimGeo, new THREE.LineBasicMaterial({ color: 0xcbd5e1 }));
+dimLine.frustumCulled = false;
+scene.add(dimLine);
+
+// ----- 글자 라벨 -----
+function setLabel(sprite, text) {
+  const { color, size } = sprite.userData;
+  const fs = 56;
+  const c = document.createElement("canvas");
+  let g = c.getContext("2d");
+  g.font = `bold ${fs}px Arial, sans-serif`;
+  c.width = Math.ceil(g.measureText(text).width) + 36;
+  c.height = fs + 28;
+  g = c.getContext("2d");
+  g.font = `bold ${fs}px Arial, sans-serif`;
+  g.fillStyle = "rgba(15,23,42,0.75)";
+  g.fillRect(0, 0, c.width, c.height);
+  g.fillStyle = color;
+  g.textBaseline = "middle";
+  g.fillText(text, 18, c.height / 2 + 2);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  if (sprite.material.map) sprite.material.map.dispose();
+  sprite.material.map = tex;
+  sprite.material.needsUpdate = true;
+  sprite.scale.set(size * c.width / c.height, size, 1);
+}
+
+function makeLabel(text, color = "#ffffff", size = 0.5) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false }));
+  s.renderOrder = 10;
+  s.userData = { color, size };
+  setLabel(s, text);
+  return s;
+}
+
+const laserLabel = makeLabel("초록색 레이저 (532 nm)");
+laserLabel.position.set(LASER_X - 0.8, 0.8, 0);
+const slitLabel = makeLabel("단일슬릿");
+slitLabel.position.set(0, BAR_TOP + 0.45, 0);
+const screenLabel = makeLabel("스크린 · 세기 분포 (점선: ×10 확대)", "#ffffff", 0.42);
+screenLabel.position.set(0, GRAPH_Y0 + GRAPH_H + 0.4, 0);
+const widthLabel = makeLabel("중앙 밝은 무늬 폭", "#fde68a", 0.3);
+widthLabel.position.set(-0.1, BR_Y - 0.32, 0);
+screenGroup.add(screenLabel, widthLabel);
+const lLabel = makeLabel("L", "#cbd5e1", 0.45);
+scene.add(laserLabel, slitLabel, lLabel);
+
+// ----- 설정이 바뀌면 다시 구성 -----
+function rebuild() {
+  const { a, L, boost } = window.simState;
+  const y1 = window.getMinMM();              // 실제 첫 어두운 무늬 위치 (mm)
+  const D = CL * L;                          // 화면상 스크린 거리
+  const half = CA * a / 2;                   // 화면상 슬릿 반폭
+  const y1Vis = y1 * S;                      // 화면상 첫 어두운 무늬 위치
+
+  U.uTanMin.value = y1Vis / D;               // 어두운 줄 방향이 스크린 무늬와 정확히 일치
+  U.uMaxX.value = D - 0.02;
+  U.uHalfA.value = half;
+  const bh = Math.max(half + 0.25, 0.35);
+  U.uBeamHalf.value = bh;
+  U.uGamma.value = boost ? window.BOOST_GAMMA : 1.0;
+  beam.scale.z = 2 * bh;
+
+  buildBarrier(half);
+  screenGroup.position.x = D;
+
+  // 스크린 무늬 텍스처: 가로 sinc² × 세로 레이저 빔 단면
+  const fw = fringeCanvas.width, fh = fringeCanvas.height;
+  const fg = fringeCanvas.getContext("2d");
+  const img = fg.createImageData(fw, fh);
+  const px = img.data;
+  const sig = window.BEAM_SIGMA_MM * S;
+  const colI = new Float32Array(fw);
+  for (let x = 0; x < fw; x++) {
+    const z = ((x + 0.5) / fw - 0.5) * SCREEN_W;
+    colI[x] = window.displayLevel(window.intensityAt(z / S, y1));
+  }
+  for (let row = 0; row < fh; row++) {
+    const yw = SCREEN_CY + (0.5 - (row + 0.5) / fh) * SCREEN_H;   // 빔 높이 y = 0 기준
+    const prof = window.beamProfile(yw / sig);
+    for (let x = 0; x < fw; x++) {
+      const [r, gg, b] = window.screenColor(colI[x] * prof);
+      const i = (row * fw + x) * 4;
+      px[i] = r; px[i + 1] = gg; px[i + 2] = b; px[i + 3] = 255;
+    }
+  }
+  fg.putImageData(img, 0, 0);
+  fringeTex.needsUpdate = true;
+
+  // 세기 그래프
+  for (let i = 0; i < N; i++) {
+    const z = (i / (N - 1) - 0.5) * SCREEN_W;
+    const I = window.intensityAt(z / S, y1);
+    const y = GRAPH_Y0 + GRAPH_H * I;
+    curvePos.set([-0.05, y, z], i * 3);
+    boostPos.set([-0.06, GRAPH_Y0 + GRAPH_H * Math.min(1, 10 * I), z], i * 3);
+    areaPos.set([-0.05, GRAPH_Y0, z, -0.05, y, z], i * 6);
+  }
+  curveGeo.attributes.position.needsUpdate = true;
+  boostGeo.attributes.position.needsUpdate = true;
+  areaGeo.attributes.position.needsUpdate = true;
+  boostCurve.computeLineDistances();
+
+  // 중앙 밝은 무늬 폭 표시
+  const bx = -0.06;
+  bracketGeo.attributes.position.array.set([
+    bx, BR_Y, -y1Vis, bx, BR_Y, y1Vis,
+    bx, BR_Y - 0.12, -y1Vis, bx, BR_Y + 0.12, -y1Vis,
+    bx, BR_Y - 0.12,  y1Vis, bx, BR_Y + 0.12,  y1Vis
+  ]);
+  bracketGeo.attributes.position.needsUpdate = true;
+  setLabel(widthLabel, `중앙 밝은 무늬 폭 = ${(2 * y1).toFixed(2)} mm`);
+
+  // 방향선
+  for (const line of rays) {
+    const tz = line.userData.m * y1Vis;
+    line.visible = Math.abs(tz) < SCREEN_W / 2;
+    line.geometry.attributes.position.array.set([0.05, 0.03, 0, D, 0.03, tz]);
+    line.geometry.attributes.position.needsUpdate = true;
+    if (line.material.isLineDashedMaterial) line.computeLineDistances();
+  }
+
+  // 거리 표시선
+  const y = FLOOR_Y + 0.02;
+  dimGeo.attributes.position.array.set([
+    0, y, DIM_Z, D, y, DIM_Z,
+    0, y, DIM_Z - 0.25, 0, y, DIM_Z + 0.25,
+    D, y, DIM_Z - 0.25, D, y, DIM_Z + 0.25
+  ]);
+  dimGeo.attributes.position.needsUpdate = true;
+
+  setLabel(slitLabel, `단일슬릿  a = ${a.toFixed(2)} mm`);
+  setLabel(lLabel, `L = ${L.toFixed(1)} m`);
+  lLabel.position.set(D / 2, FLOOR_Y + 0.4, DIM_Z);
+}
+
+// ----- 시점 -----
+let goal = null;
+function viewPose(v) {
+  const D = CL * window.simState.L;
+  const cx = D / 2 - 1.5;
+  switch (v) {
+    case "top":    return { pos: [cx, 18, 0.01], target: [cx, 0, 0] };
+    case "side":   return { pos: [cx, 1.5, 17], target: [cx, 0, 0] };
+    case "screen": return { pos: [D - 5.5, 2.8, 0.6], target: [D, SCREEN_CY, 0] };
+    default:       return { pos: [-7, 7.5, 11], target: [cx, 0, 0] };
+  }
+}
+function setView(v, instant = false) {
+  const p = viewPose(v);
+  const pos = new THREE.Vector3(...p.pos);
+  const target = new THREE.Vector3(...p.target);
+  if (instant) {
+    camera.position.copy(pos);
+    controls.target.copy(target);
+    goal = null;
+  } else {
+    goal = { pos, target };
+  }
+  controls.update();
+}
+controls.addEventListener("start", () => { goal = null; });
+
+// ----- 크기 맞춤 -----
+function resize() {
+  const w = wrap.clientWidth;
+  const h = Math.round(Math.max(360, Math.min(560, w * 0.55)));
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+
+// ----- 이벤트 연결 -----
+document.addEventListener("sim:change", rebuild);
+document.addEventListener("sim:view", e => setView(e.detail));
+document.addEventListener("sim:reset", () => setView("3d"));
+
+// ----- 반복 그리기 -----
+const clock = new THREE.Clock();
+function loop() {
+  requestAnimationFrame(loop);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (window.simState.running) U.uTime.value += dt;
+
+  if (goal) {
+    camera.position.lerp(goal.pos, 0.1);
+    controls.target.lerp(goal.target, 0.1);
+    if (camera.position.distanceTo(goal.pos) < 0.01) goal = null;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+// ----- 시작 -----
+resize();
+rebuild();
+setView("3d", true);
+loading.remove();
+window.__threeReady = true;
+loop();
+</script>
+
+<!-- 3D를 불러오지 못했을 때 안내 -->
+<script>
+setTimeout(() => {
+  if (!window.__threeReady) {
+    const el = document.getElementById("loading3d");
+    if (el) el.textContent = "3D 장면을 불러오지 못했습니다. 인터넷 연결을 확인해 주세요. (아래 회절무늬와 계산 결과는 그대로 사용할 수 있습니다)";
+  }
+}, 8000);
+</script>
+</body>
+</html>
